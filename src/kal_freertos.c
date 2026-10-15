@@ -15,7 +15,7 @@
 #include "port_smp.h"
 #include "uart.h"
 
-#define KTHREAD_DEFAULT_STACK_WORDS 2048
+#define KTHREAD_DEFAULT_STACK_WORDS 4096
 #define KTHREAD_DEFAULT_PRIORITY    (tskIDLE_PRIORITY + 2)
 
 /* =========================================================================
