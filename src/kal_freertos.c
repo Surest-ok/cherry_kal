@@ -344,6 +344,25 @@ struct task_struct *kthread_current(void)
     return &s_cur_tasks[cpu];
 }
 
+const char *kthread_name(struct task_struct *task)
+{
+    if (!task || !task->handle) {
+        return pcTaskGetName(NULL);
+    }
+    return pcTaskGetName((TaskHandle_t)task->handle);
+}
+
+void *kthread_raw_handle(struct task_struct *task)
+{
+    if (!task) return NULL;
+    return task->handle;
+}
+
+int kal_scheduler_is_running(void)
+{
+    return (xTaskGetSchedulerState() == taskSCHEDULER_RUNNING) ? 1 : 0;
+}
+
 void kthread_exit(int code)
 {
     (void)code;
@@ -356,6 +375,29 @@ void kthread_delete(struct task_struct *task)
         vTaskDelete((TaskHandle_t)task->handle);
         task->handle = NULL;
     }
+}
+
+void *kthread_get_data(void)
+{
+#if ( configNUM_THREAD_LOCAL_STORAGE_POINTERS > 0 )
+    if (xTaskGetSchedulerState() != taskSCHEDULER_NOT_STARTED && xTaskGetCurrentTaskHandle() != NULL) {
+        return pvTaskGetThreadLocalStoragePointer(NULL, 0);
+    }
+    return NULL;
+#else
+    return NULL;
+#endif
+}
+
+void kthread_set_data(void *data)
+{
+#if ( configNUM_THREAD_LOCAL_STORAGE_POINTERS > 0 )
+    if (xTaskGetSchedulerState() != taskSCHEDULER_NOT_STARTED && xTaskGetCurrentTaskHandle() != NULL) {
+        vTaskSetThreadLocalStoragePointer(NULL, 0, data);
+    }
+#else
+    (void)data;
+#endif
 }
 
 /* =========================================================================

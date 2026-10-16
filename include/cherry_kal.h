@@ -126,8 +126,13 @@ void msleep(unsigned int msecs);
 void usleep_range(unsigned long min, unsigned long max);
 unsigned int smp_processor_id(void);
 struct task_struct *kthread_current(void);
+const char *kthread_name(struct task_struct *task);
+void *kthread_raw_handle(struct task_struct *task);
+int  kal_scheduler_is_running(void);
 void kthread_exit(int code);
 void kthread_delete(struct task_struct *task);
+void *kthread_get_data(void);
+void  kthread_set_data(void *data);
 
 /* =========================================================================
  * 7. Time and Jiffies
