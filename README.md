@@ -122,6 +122,22 @@ smp_mb();   smp_rmb();   smp_wmb();
 
 *(注：同时提供 `kal_*` 宏作为向后兼容映射。)*
 
+### 9. 延迟工作队列（Linux Workqueue Subsystem）
+```c
+struct workqueue_struct *create_workqueue(const char *name);
+void destroy_workqueue(struct workqueue_struct *wq);
+bool queue_work(struct workqueue_struct *wq, struct work_struct *work);
+bool schedule_work(struct work_struct *work);
+void flush_workqueue(struct workqueue_struct *wq);
+```
+
+### 10. 内核健康看门狗与统计监视（Kernel Health & Watchdog）
+```c
+int cherry_health_init(void);
+int cherry_health_get_stats(struct cherry_health_stats *stats);
+/* 后台 khealthd 守护线程周期检测内核空闲堆内存、活跃任务数、CPU 在线核心状态 */
+```
+
 ---
 
 ## 🛠️ FreeRTOS SMP 适配层实现

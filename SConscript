@@ -20,6 +20,8 @@ kal_env.Append(CPPPATH=[
 
 kal_sources = [
     'src/kal_freertos.c',
+    'src/kal_workqueue.c',
+    'src/kal_health.c',
 ]
 
 kal_objs = kal_env.Object(kal_sources)
