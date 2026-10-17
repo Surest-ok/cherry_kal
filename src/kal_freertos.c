@@ -245,10 +245,14 @@ static void kthread_wrapper(void *arg)
     struct kthread_wrapper_arg *karg = (struct kthread_wrapper_arg *)arg;
     kthread_fn_t fn = karg->fn;
     void *data = karg->data;
+    struct task_struct *ts = karg->ts;
     kfree(karg);
 
     if (fn) {
         fn(data);
+    }
+    if (ts) {
+        ts->handle = NULL;
     }
     vTaskDelete(NULL);
 }
