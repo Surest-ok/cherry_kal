@@ -73,16 +73,35 @@ int  mutex_trylock(struct mutex *lock);
 void mutex_unlock(struct mutex *lock);
 void mutex_destroy(struct mutex *lock);
 
+struct task_struct;
+/* =========================================================================
+ * 3.1 Real-Time Mutex with Priority Inheritance Protocol (PIP)
+ * ========================================================================= */
+struct rt_mutex {
+    void *handle;
+};
+
+void rt_mutex_init(struct rt_mutex *lock);
+void rt_mutex_lock(struct rt_mutex *lock);
+int  rt_mutex_trylock(struct rt_mutex *lock);
+int  rt_mutex_lock_timeout(struct rt_mutex *lock, unsigned long timeout_ms);
+void rt_mutex_unlock(struct rt_mutex *lock);
+void rt_mutex_destroy(struct rt_mutex *lock);
+
+int  kthread_get_priority(struct task_struct *task);
+void kthread_set_priority(struct task_struct *task, int prio);
+bool kal_pip_verify_test(void);
+
 /* =========================================================================
  * 4. Spinlock (spinlock_t, spin_lock, spin_unlock, spin_lock_irqsave)
  * ========================================================================= */
 typedef struct spinlock {
     volatile uint32_t lock;
-    uint32_t          owner_core;
+    void             *owner;
     uint32_t          nesting;
 } spinlock_t;
 
-#define SPIN_LOCK_UNLOCKED (spinlock_t){ 0, 0xFFFFFFFFU, 0 }
+#define SPIN_LOCK_UNLOCKED (spinlock_t){ 0, NULL, 0 }
 
 void spin_lock_init(spinlock_t *lock);
 void spin_lock(spinlock_t *lock);
