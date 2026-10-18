@@ -110,19 +110,38 @@ void mutex_destroy(struct mutex *lock)
 }
 
 /* =========================================================================
- * 2.1 Real-Time Priority Inheritance Protocol (PIP) Mutex
+ * 2.1 Real-Time Priority Inheritance Protocol (PIP) & Priority Ceiling (PCP) Mutex
  * ========================================================================= */
 void rt_mutex_init(struct rt_mutex *lock)
 {
     if (!lock) return;
     SemaphoreHandle_t sem = xSemaphoreCreateMutex();
     lock->handle = (void *)sem;
+    lock->ceiling_prio = -1;
+    lock->saved_prio = -1;
+}
+
+void rt_mutex_init_ceiling(struct rt_mutex *lock, int ceiling_prio)
+{
+    if (!lock) return;
+    SemaphoreHandle_t sem = xSemaphoreCreateMutex();
+    lock->handle = (void *)sem;
+    lock->ceiling_prio = ceiling_prio;
+    lock->saved_prio = -1;
 }
 
 void rt_mutex_lock(struct rt_mutex *lock)
 {
     if (!lock || !lock->handle) return;
     if (xTaskGetSchedulerState() == taskSCHEDULER_NOT_STARTED) return;
+
+    if (lock->ceiling_prio >= 0) {
+        int cur_prio = kthread_get_priority(NULL);
+        if (lock->ceiling_prio > cur_prio) {
+            lock->saved_prio = cur_prio;
+            kthread_set_priority(NULL, lock->ceiling_prio);
+        }
+    }
     xSemaphoreTake((SemaphoreHandle_t)lock->handle, portMAX_DELAY);
 }
 
@@ -130,24 +149,51 @@ int rt_mutex_trylock(struct rt_mutex *lock)
 {
     if (!lock || !lock->handle) return 0;
     if (xTaskGetSchedulerState() == taskSCHEDULER_NOT_STARTED) return 1;
+
     BaseType_t ret = xSemaphoreTake((SemaphoreHandle_t)lock->handle, 0);
-    return (ret == pdTRUE) ? 1 : 0;
+    if (ret == pdTRUE) {
+        if (lock->ceiling_prio >= 0) {
+            int cur_prio = kthread_get_priority(NULL);
+            if (lock->ceiling_prio > cur_prio) {
+                lock->saved_prio = cur_prio;
+                kthread_set_priority(NULL, lock->ceiling_prio);
+            }
+        }
+        return 1;
+    }
+    return 0;
 }
 
 int rt_mutex_lock_timeout(struct rt_mutex *lock, unsigned long timeout_ms)
 {
     if (!lock || !lock->handle) return -EINVAL;
     if (xTaskGetSchedulerState() == taskSCHEDULER_NOT_STARTED) return 0;
+
     TickType_t ticks = (timeout_ms == 0) ? 0 : (timeout_ms * configTICK_RATE_HZ) / 1000;
     BaseType_t ret = xSemaphoreTake((SemaphoreHandle_t)lock->handle, ticks);
-    return (ret == pdTRUE) ? 0 : -ETIMEDOUT;
+    if (ret == pdTRUE) {
+        if (lock->ceiling_prio >= 0) {
+            int cur_prio = kthread_get_priority(NULL);
+            if (lock->ceiling_prio > cur_prio) {
+                lock->saved_prio = cur_prio;
+                kthread_set_priority(NULL, lock->ceiling_prio);
+            }
+        }
+        return 0;
+    }
+    return -ETIMEDOUT;
 }
 
 void rt_mutex_unlock(struct rt_mutex *lock)
 {
     if (!lock || !lock->handle) return;
     if (xTaskGetSchedulerState() == taskSCHEDULER_NOT_STARTED) return;
+
     xSemaphoreGive((SemaphoreHandle_t)lock->handle);
+    if (lock->ceiling_prio >= 0 && lock->saved_prio >= 0) {
+        kthread_set_priority(NULL, lock->saved_prio);
+        lock->saved_prio = -1;
+    }
 }
 
 void rt_mutex_destroy(struct rt_mutex *lock)
@@ -155,6 +201,8 @@ void rt_mutex_destroy(struct rt_mutex *lock)
     if (!lock || !lock->handle) return;
     vSemaphoreDelete((SemaphoreHandle_t)lock->handle);
     lock->handle = NULL;
+    lock->ceiling_prio = -1;
+    lock->saved_prio = -1;
 }
 
 int kthread_get_priority(struct task_struct *task)
@@ -169,22 +217,68 @@ void kthread_set_priority(struct task_struct *task, int prio)
     vTaskPrioritySet(h, (UBaseType_t)prio);
 }
 
+int kthread_set_affinity_mask(struct task_struct *task, unsigned long mask)
+{
+    TaskHandle_t h = (task && task->handle) ? (TaskHandle_t)task->handle : xTaskGetCurrentTaskHandle();
+    if (!h) return -EINVAL;
+#if ( ( configNUMBER_OF_CORES > 1 ) && ( configUSE_CORE_AFFINITY == 1 ) )
+    vTaskCoreAffinitySet(h, (UBaseType_t)mask);
+    return 0;
+#else
+    (void)mask;
+    return 0;
+#endif
+}
+
+unsigned long kthread_get_affinity_mask(struct task_struct *task)
+{
+    TaskHandle_t h = (task && task->handle) ? (TaskHandle_t)task->handle : xTaskGetCurrentTaskHandle();
+    if (!h) return 0;
+#if ( ( configNUMBER_OF_CORES > 1 ) && ( configUSE_CORE_AFFINITY == 1 ) )
+    return (unsigned long)vTaskCoreAffinityGet(h);
+#else
+    return 1;
+#endif
+}
+
 bool kal_pip_verify_test(void)
 {
     struct rt_mutex mtx;
     rt_mutex_init(&mtx);
     if (!mtx.handle) return false;
 
-    /* Verify basic acquisition and trylock semantics */
+    /* Verify basic acquisition and trylock semantics (PIP) */
     int t1 = rt_mutex_trylock(&mtx);
     rt_mutex_unlock(&mtx);
 
     /* Verify priority inquiry */
-    int prio = kthread_get_priority(NULL);
-    bool pass = (prio >= 0 && t1 == 1);
-
+    int orig_prio = kthread_get_priority(NULL);
+    bool pass_prio = (orig_prio >= 0 && t1 == 1);
     rt_mutex_destroy(&mtx);
-    pr_info("cherry_kal: [kal-verify] pip_mutex=pass prio_inq=pass all=%s\n", pass ? "pass" : "fail");
+
+    /* Verify Priority Ceiling Protocol (PCP) */
+    kthread_set_priority(NULL, 2);
+    struct rt_mutex pcp_mtx;
+    rt_mutex_init_ceiling(&pcp_mtx, 4);
+    rt_mutex_lock(&pcp_mtx);
+    int elevated_prio = kthread_get_priority(NULL);
+    rt_mutex_unlock(&pcp_mtx);
+    int restored_prio = kthread_get_priority(NULL);
+    rt_mutex_destroy(&pcp_mtx);
+    kthread_set_priority(NULL, orig_prio);
+
+    bool pass_pcp = (elevated_prio == 4 && restored_prio == 2);
+
+    /* Verify Task Affinity API */
+    unsigned long cur_aff = kthread_get_affinity_mask(NULL);
+    int aff_ret = kthread_set_affinity_mask(NULL, cur_aff);
+    bool pass_aff = (cur_aff != 0 && aff_ret == 0);
+
+    bool pass = pass_prio && pass_pcp && pass_aff;
+    pr_info("cherry_kal: [kal-verify] pip_mutex=pass pcp_mutex=%s affinity=%s all=%s\n",
+            pass_pcp ? "pass" : "fail",
+            pass_aff ? "pass" : "fail",
+            pass ? "pass" : "fail");
     return pass;
 }
 

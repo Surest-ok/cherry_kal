@@ -79,9 +79,12 @@ struct task_struct;
  * ========================================================================= */
 struct rt_mutex {
     void *handle;
+    int   ceiling_prio;
+    int   saved_prio;
 };
 
 void rt_mutex_init(struct rt_mutex *lock);
+void rt_mutex_init_ceiling(struct rt_mutex *lock, int ceiling_prio);
 void rt_mutex_lock(struct rt_mutex *lock);
 int  rt_mutex_trylock(struct rt_mutex *lock);
 int  rt_mutex_lock_timeout(struct rt_mutex *lock, unsigned long timeout_ms);
@@ -90,6 +93,8 @@ void rt_mutex_destroy(struct rt_mutex *lock);
 
 int  kthread_get_priority(struct task_struct *task);
 void kthread_set_priority(struct task_struct *task, int prio);
+int  kthread_set_affinity_mask(struct task_struct *task, unsigned long mask);
+unsigned long kthread_get_affinity_mask(struct task_struct *task);
 bool kal_pip_verify_test(void);
 
 /* =========================================================================
